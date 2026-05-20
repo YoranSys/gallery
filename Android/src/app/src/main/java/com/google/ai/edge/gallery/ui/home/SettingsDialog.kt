@@ -40,6 +40,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +51,7 @@ import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,10 +64,13 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -73,6 +78,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.google.ai.edge.gallery.BuildConfig
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.api.ACTION_START_API_SERVER
+import com.google.ai.edge.gallery.api.ACTION_STOP_API_SERVER
+import com.google.ai.edge.gallery.api.API_KEY_SECRET
+import com.google.ai.edge.gallery.api.DEFAULT_API_PORT
+import com.google.ai.edge.gallery.api.InferenceApiService
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.ui.common.ClickableLink
 import com.google.ai.edge.gallery.ui.common.tos.AppTosDialog
@@ -83,6 +93,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 import kotlin.math.min
 
 private val THEME_OPTIONS = listOf(Theme.THEME_AUTO, Theme.THEME_LIGHT, Theme.THEME_DARK)
@@ -96,6 +107,15 @@ fun SettingsDialog(
 ) {
   var selectedTheme by remember { mutableStateOf(curThemeOverride) }
   var hfToken by remember { mutableStateOf(modelManagerViewModel.getTokenStatusAndData().data) }
+  var apiServerEnabled by remember {
+    mutableStateOf(modelManagerViewModel.dataStoreRepository.isApiServerEnabled())
+  }
+  var apiKey by remember {
+    mutableStateOf(
+      modelManagerViewModel.dataStoreRepository.readSecret(API_KEY_SECRET)
+        ?: UUID.randomUUID().toString().replace("-", "").take(32)
+    )
+  }
   val dateFormatter = remember {
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
       .withZone(ZoneId.systemDefault())
@@ -287,6 +307,84 @@ fun SettingsDialog(
                     }
                   }
                 }
+              }
+            }
+          }
+
+          // Inference API server.
+          Column(
+            modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            val clipboardManager: ClipboardManager = LocalClipboardManager.current
+            val port = modelManagerViewModel.dataStoreRepository.readApiServerPort()
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                "Local inference API",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+              )
+              Switch(
+                checked = apiServerEnabled,
+                onCheckedChange = { enabled ->
+                  apiServerEnabled = enabled
+                  modelManagerViewModel.dataStoreRepository.setApiServerEnabled(enabled)
+                  // Persist the API key if not yet saved.
+                  if (modelManagerViewModel.dataStoreRepository.readSecret(API_KEY_SECRET) == null) {
+                    modelManagerViewModel.dataStoreRepository.saveSecret(API_KEY_SECRET, apiKey)
+                  }
+                  val serviceIntent = Intent(context, InferenceApiService::class.java).apply {
+                    action = if (enabled) ACTION_START_API_SERVER else ACTION_STOP_API_SERVER
+                  }
+                  if (enabled) context.startForegroundService(serviceIntent)
+                  else context.startService(serviceIntent)
+                },
+              )
+            }
+            Text(
+              "Exposes an OpenAI-compatible API on port $port for other devices on your WiFi.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (apiServerEnabled) {
+              Text(
+                "POST /v1/chat/completions  •  GET /v1/models",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp),
+              )
+            }
+            // API key row.
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+              Text(
+                "API key: ${apiKey.take(8)}…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+              )
+              IconButton(
+                onClick = { clipboardManager.setText(AnnotatedString(apiKey)) },
+              ) {
+                Icon(
+                  Icons.Rounded.ContentCopy,
+                  contentDescription = "Copy API key",
+                  modifier = Modifier.height(18.dp),
+                )
+              }
+              OutlinedButton(
+                onClick = {
+                  apiKey = UUID.randomUUID().toString().replace("-", "").take(32)
+                  modelManagerViewModel.dataStoreRepository.saveSecret(API_KEY_SECRET, apiKey)
+                },
+              ) {
+                Text("Regenerate", style = MaterialTheme.typography.bodySmall)
               }
             }
           }

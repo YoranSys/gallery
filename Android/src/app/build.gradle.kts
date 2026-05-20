@@ -30,7 +30,8 @@ plugins {
 
 android {
   namespace = "com.google.ai.edge.gallery"
-  compileSdk = 35
+  compileSdk = 36
+  buildToolsVersion = "36.1.0"
 
   defaultConfig {
     applicationId = "com.google.aiedge.gallery"
@@ -124,6 +125,11 @@ dependencies {
   implementation(libs.mcp.kotlin.sdk)
   implementation(libs.ktor.client.android)
   implementation(libs.ktor.client.core)
+  implementation(libs.ktor.server.cio)
+  implementation(libs.ktor.server.core)
+  implementation(libs.ktor.server.content.negotiation)
+  implementation(libs.ktor.serialization.kotlinx.json)
+  implementation(libs.ktor.server.status.pages)
 }
 
 protobuf {

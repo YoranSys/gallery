@@ -109,6 +109,18 @@ interface DataStoreRepository {
 
   /** Returns whether a promo with the specified ID has been viewed. */
   fun hasViewedPromo(promoId: String): Boolean
+
+  // ---------------------------------------------------------------------------
+  // Inference API server settings
+  // ---------------------------------------------------------------------------
+
+  fun setApiServerEnabled(enabled: Boolean)
+
+  fun isApiServerEnabled(): Boolean
+
+  fun setApiServerPort(port: Int)
+
+  fun readApiServerPort(): Int
 }
 
 /** Repository for managing data using Proto DataStore. */
@@ -426,6 +438,33 @@ class DefaultDataStoreRepository(
     return runBlocking {
       val settings = dataStore.data.first()
       settings.viewedPromoIdList.contains(promoId)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inference API server settings
+  // ---------------------------------------------------------------------------
+
+  override fun setApiServerEnabled(enabled: Boolean) {
+    runBlocking {
+      dataStore.updateData { settings -> settings.toBuilder().setApiServerEnabled(enabled).build() }
+    }
+  }
+
+  override fun isApiServerEnabled(): Boolean {
+    return runBlocking { dataStore.data.first().apiServerEnabled }
+  }
+
+  override fun setApiServerPort(port: Int) {
+    runBlocking {
+      dataStore.updateData { settings -> settings.toBuilder().setApiServerPort(port).build() }
+    }
+  }
+
+  override fun readApiServerPort(): Int {
+    return runBlocking {
+      val port = dataStore.data.first().apiServerPort
+      if (port == 0) com.google.ai.edge.gallery.api.DEFAULT_API_PORT else port
     }
   }
 }

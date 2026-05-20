@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Allows cleartext HTTP traffic on local network subnets so that other devices on the same
+  WiFi can reach the on-device inference API server (default port 11434).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- RFC-1918 private subnets -->
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <domain includeSubdomains="true">10.0.0.0</domain>
+        <domain includeSubdomains="true">172.16.0.0</domain>
+        <!-- localhost for development / emulator -->
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

@@ -81,6 +81,10 @@ message Settings {
   // copybara:strip_end
 
   repeated string viewed_promo_id = 10;
+
+  // API server configuration.
+  bool api_server_enabled = 11;
+  int32 api_server_port = 12;
 }
 
 message McpAuth {

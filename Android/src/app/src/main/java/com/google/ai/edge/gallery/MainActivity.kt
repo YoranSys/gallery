@@ -50,6 +50,8 @@ import androidx.core.net.toUri
 import androidx.core.os.bundleOf
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
+import com.google.ai.edge.gallery.api.ACTION_START_API_SERVER
+import com.google.ai.edge.gallery.api.InferenceApiService
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.GalleryTheme
 import com.google.ai.edge.litertlm.ExperimentalApi
@@ -125,6 +127,7 @@ class MainActivity : ComponentActivity() {
     }
 
     modelManagerViewModel.loadModelAllowlist()
+    startInferenceApiServiceIfEnabled()
 
     // Show splash screen.
     val splashScreen = installSplashScreen()
@@ -180,6 +183,17 @@ class MainActivity : ComponentActivity() {
     }
     // Keep the screen on while the app is running for better demo experience.
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+  }
+
+  private fun startInferenceApiServiceIfEnabled() {
+    if (!modelManagerViewModel.dataStoreRepository.isApiServerEnabled()) {
+      return
+    }
+
+    val serviceIntent = Intent(this, InferenceApiService::class.java).apply {
+      action = ACTION_START_API_SERVER
+    }
+    startForegroundService(serviceIntent)
   }
 
   override fun onNewIntent(intent: Intent) {

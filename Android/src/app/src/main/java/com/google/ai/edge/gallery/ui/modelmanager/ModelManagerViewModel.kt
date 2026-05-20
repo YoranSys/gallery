@@ -57,6 +57,8 @@ import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
+import com.google.ai.edge.gallery.runtime.runtimeHelper
+import com.google.ai.edge.gallery.api.ApiModelBridge
 import com.google.ai.edge.litertlm.Contents
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
@@ -197,6 +199,7 @@ constructor(
   private val lifecycleProvider: AppLifecycleProvider,
   private val customTasks: Set<@JvmSuppressWildcards CustomTask>,
   private val systemPromptRepository: SystemPromptRepository,
+  val apiModelBridge: ApiModelBridge,
   @ApplicationContext private val context: Context,
 ) : ViewModel() {
   private val externalFilesDir = context.getExternalFilesDir(null)
@@ -450,6 +453,8 @@ constructor(
             model = model,
             status = ModelInitializationStatusType.INITIALIZED,
           )
+          // Expose the initialized model to the inference API server.
+          apiModelBridge.setActiveModel(model, model.runtimeHelper)
           if (model.cleanUpAfterInit) {
             Log.d(TAG, "Model '${model.name}' needs cleaning up after init.")
             cleanupModel(context = context, task = task, model = model)
@@ -537,6 +542,12 @@ constructor(
     }
 
     _uiState.update { it.copy(modelDownloadStatus = curModelDownloadStatus) }
+
+    // When a new model finishes downloading, pre-register it so the API server can auto-load it.
+    if (status.status == ModelDownloadStatusType.SUCCEEDED && curModel.isLlm) {
+      Log.d(TAG, "Model '${curModel.name}' downloaded — pre-registering for API auto-load")
+      apiModelBridge.setActiveModel(curModel, curModel.runtimeHelper)
+    }
   }
 
   fun setInitializationStatus(model: Model, status: ModelInitializationStatus) {
@@ -833,6 +844,16 @@ constructor(
 
   // TODO: b/494029782 - Both litertlm and aicore download and storage should be unified into a
   // model repository.
+  /**
+   * Registers the first downloaded LLM with [ApiModelBridge] so the inference API server can
+   * auto-load it on demand without the user opening the model screen.
+   */
+  private fun preRegisterFirstDownloadedLlm() {
+    val model = getAllDownloadedModels().firstOrNull() ?: return
+    Log.d(TAG, "Pre-registering model '${model.name}' for API auto-load")
+    apiModelBridge.setActiveModel(model, model.runtimeHelper)
+  }
+
   private fun checkAICoreModelStatuses() {
     viewModelScope.launch(Dispatchers.Main) {
       val aicoreModels =
@@ -1021,6 +1042,10 @@ constructor(
 
         // Process pending downloads.
         processPendingDownloads()
+
+        // Pre-register any already-downloaded LLM so the API server can auto-load it
+        // without requiring the user to open the model screen first.
+        preRegisterFirstDownloadedLlm()
 
         // Wait for AICore models statuses and update download indicators
         checkAICoreModelStatuses()
