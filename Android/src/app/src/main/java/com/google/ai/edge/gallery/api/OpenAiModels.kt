@@ -16,9 +16,18 @@
 
 package com.google.ai.edge.gallery.api
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonArray
 
 // ---------------------------------------------------------------------------
 // Tool / function-calling models
@@ -61,13 +70,115 @@ data class ToolCallDelta(
 )
 
 // ---------------------------------------------------------------------------
+// Request models - Content parts for multimodal messages
+// ---------------------------------------------------------------------------
+
+/** Base class for content parts in multimodal messages. */
+@Serializable
+sealed class ContentPart {
+  abstract val type: String
+}
+
+@Serializable
+@SerialName("text")
+data class TextPart(
+  override val type: String = "text",
+  val text: String,
+) : ContentPart()
+
+@Serializable
+data class ImageUrl(
+  val url: String,
+)
+
+@Serializable
+@SerialName("image_url")
+data class ImageUrlPart(
+  override val type: String = "image_url",
+  @SerialName("image_url") val imageUrl: ImageUrl,
+) : ContentPart()
+
+/**
+ * Custom serializer for ChatMessage.content that accepts either:
+ * - A string (for text-only messages)
+ * - A list of ContentPart (for multimodal messages with images)
+ */
+class ContentSerializer : KSerializer<MessageContent> {
+  private val stringSerializer = String.serializer()
+
+  override val descriptor: SerialDescriptor = String.serializer().descriptor
+
+  override fun serialize(encoder: Encoder, value: MessageContent) {
+    when (value) {
+      is MessageContent.TextContent -> encoder.encodeString(value.text)
+      is MessageContent.MultimodalContent -> {
+        // For multimodal content, we need to manually serialize as JSON array
+        // This is a simplified approach
+        encoder.encodeString("[multimodal]") // Placeholder - full impl would build JSON
+      }
+    }
+  }
+
+  override fun deserialize(decoder: Decoder): MessageContent {
+    val json = decoder as? kotlinx.serialization.json.JsonDecoder
+      ?: throw IllegalStateException("Expected JsonDecoder")
+    
+    val element = json.decodeJsonElement()
+    
+    return when {
+      element is JsonArray -> {
+        // It's an array of content parts - manually parse
+        val parts = element.map { jsonElement ->
+          when {
+            jsonElement is JsonObject && 
+              jsonElement["type"] is JsonPrimitive && 
+              (jsonElement["type"] as JsonPrimitive).content == "text" -> {
+              TextPart(
+                type = "text",
+                text = (jsonElement["text"] as? JsonPrimitive)?.content ?: ""
+              )
+            }
+            jsonElement is JsonObject &&
+              jsonElement["type"] is JsonPrimitive && 
+              (jsonElement["type"] as JsonPrimitive).content == "image_url" -> {
+              val imageUrlObj = jsonElement["image_url"] as? JsonObject
+              val url = imageUrlObj?.get("url") as? JsonPrimitive
+              ImageUrlPart(
+                type = "image_url",
+                imageUrl = ImageUrl(url = url?.content ?: "")
+              )
+            }
+            else -> throw IllegalArgumentException("Invalid content part type")
+          }
+        }
+        MessageContent.MultimodalContent(parts)
+      }
+      element is JsonPrimitive && element.isString -> {
+        MessageContent.TextContent(element.content)
+      }
+      else -> throw IllegalArgumentException("Content must be a string or a list of content parts")
+    }
+  }
+}
+
+/** Union type for message content that can be either plain text or multimodal. */
+@Serializable(with = ContentSerializer::class)
+sealed class MessageContent {
+  @Serializable
+  data class TextContent(val text: String) : MessageContent()
+  
+  @Serializable
+  data class MultimodalContent(val parts: List<ContentPart>) : MessageContent()
+}
+
+// ---------------------------------------------------------------------------
 // Request models
 // ---------------------------------------------------------------------------
 
 @Serializable
 data class ChatMessage(
   val role: String,
-  val content: String? = null,
+  val content: MessageContent? = null,
   @SerialName("tool_calls") val toolCalls: List<ToolCall>? = null,
   @SerialName("tool_call_id") val toolCallId: String? = null,
 )

@@ -1,0 +1,14 @@
+services:
+  gradle:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./Android/src:/workspace
+      - ~/.gradle:/root/.gradle
+    environment:
+      - ANDROID_HOME=/opt/android-sdk
+      - ANDROID_SDK_ROOT=/opt/android-sdk
+    working_dir: /workspace
+    tty: true
+    stdin_open: true

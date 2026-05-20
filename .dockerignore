@@ -1,0 +1,32 @@
+# Ignore everything except Android project and build files
+*
+!Android/
+!Android/src/
+!Dockerfile
+!docker-compose.yml
+!.dockerignore
+!entrypoint.sh
+!Makefile
+
+# Gradle cache
+.gradle/
+
+# Git
+.git/
+.gitignore
+
+# IDE files
+.idea/
+*.iml
+
+# Build outputs
+build/
+
+# Local properties
+local.properties
+
+# Logs
+*.log
+
+# Documentation
+*.md

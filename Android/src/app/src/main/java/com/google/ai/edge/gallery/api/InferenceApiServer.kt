@@ -16,6 +16,9 @@
 
 package com.google.ai.edge.gallery.api
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import android.util.Log
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -47,6 +50,178 @@ const val DEFAULT_API_PORT = 11434
 
 /** Secret map key used to store the API key in UserData.secrets. */
 const val API_KEY_SECRET = "inference_api_key"
+
+/**
+ * Estimates the number of tokens in a string using a simple whitespace-based approximation.
+ * This is a rough estimate: actual token count depends on the tokenizer.
+ * We reserve some margin to account for tokenization differences.
+ */
+private fun estimateTokenCount(text: String): Int {
+  // Simple approximation: count whitespace-separated tokens
+  // This is not accurate for all tokenizers but gives a reasonable estimate
+  if (text.isEmpty()) return 0
+  // Count whitespace-delimited words as rough token estimate
+  return text.split("\\s+".toRegex()).size
+}
+
+/**
+ * Helper function to extract text representation from MessageContent.
+ * For images, returns a placeholder description.
+ */
+private fun MessageContent?.toText(): String {
+  return when (this) {
+    null -> ""
+    is MessageContent.TextContent -> text
+    is MessageContent.MultimodalContent -> {
+      parts.joinToString(" ") { part ->
+        when (part) {
+          is TextPart -> part.text
+          is ImageUrlPart -> "[Image]"
+          else -> ""
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Helper function to extract image Bitmaps from a list of messages.
+ * Returns a list of Bitmaps for all image URLs found in the messages.
+ */
+private fun extractImagesFromMessages(messages: List<ChatMessage>): List<Bitmap> {
+  val bitmaps = mutableListOf<Bitmap>()
+  
+  for (msg in messages) {
+    val content = msg.content ?: continue
+    if (content is MessageContent.MultimodalContent) {
+      for (part in content.parts) {
+        if (part is ImageUrlPart) {
+          val bitmap = decodeBase64Image(part.imageUrl.url)
+          if (bitmap != null) {
+            bitmaps.add(bitmap)
+          }
+        }
+      }
+    }
+  }
+  
+  return bitmaps
+}
+
+/**
+ * Decodes a base64-encoded image URL to a Bitmap.
+ * Supports data URLs like "data:image/jpeg;base64,..."
+ */
+private fun decodeBase64Image(imageUrl: String): Bitmap? {
+  return try {
+    // Handle data URLs: "data:image/jpeg;base64,/9j/4AAQSk..."
+    val base64Data = if (imageUrl.startsWith("data:")) {
+      val commaIndex = imageUrl.indexOf(',')
+      if (commaIndex >= 0) {
+        imageUrl.substring(commaIndex + 1)
+      } else {
+        return null
+      }
+    } else {
+      imageUrl
+    }
+    
+    val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+  } catch (e: Exception) {
+    Log.w(TAG, "Failed to decode image: ${e.message}")
+    null
+  }
+}
+
+/**
+ * Estimates the total token count for a list of messages.
+ */
+private fun estimateMessageListTokenCount(messages: List<ChatMessage>, tools: List<Tool>?): Int {
+  // Build a minimal prompt representation to estimate tokens
+  val sb = StringBuilder()
+  for (msg in messages) {
+    when (msg.role) {
+      "system" -> {
+        sb.append("[System]: ${msg.content.toText()}")
+        if (!tools.isNullOrEmpty()) {
+          sb.append("\n\n## Tool Use")
+          for (tool in tools) {
+            sb.append(" ${tool.function.name}")
+          }
+        }
+      }
+      "assistant" -> {
+        if (!msg.toolCalls.isNullOrEmpty()) {
+          sb.append("[Assistant]: {}")
+        } else {
+          sb.append("[Assistant]: ${msg.content.toText()}")
+        }
+      }
+      "tool" -> sb.append("[Tool]: ${msg.content.toText()}")
+      else -> sb.append("[User]: ${msg.content.toText()}")
+    }
+    sb.append("\n")
+  }
+  return estimateTokenCount(sb.toString())
+}
+
+/**
+ * Truncates the message list to fit within the model's context window.
+ * Keeps the most recent messages (last N) to stay under the token limit.
+ * Always keeps at least the system message (if present) and the last user message.
+ */
+private fun truncateMessagesToFit(
+  messages: List<ChatMessage>,
+  tools: List<Tool>?,
+  maxTokens: Int,
+  // Reserve some tokens for the response
+  reservedTokens: Int = 100
+): List<ChatMessage> {
+  if (messages.isEmpty()) return messages
+
+  // First, try the full message list
+  val fullTokenCount = estimateMessageListTokenCount(messages, tools)
+  if (fullTokenCount <= maxTokens - reservedTokens) {
+    return messages
+  }
+
+  // Find system message index
+  val systemMessageIndex = messages.indexOfFirst { it.role == "system" }
+  val systemMessage = if (systemMessageIndex >= 0) messages[systemMessageIndex] else null
+
+  // Separate system message from conversation
+  val conversationMessages = messages.filter { it.role != "system" }
+
+  // Binary search to find the maximum number of recent messages that fit
+  // We always want to keep at least 1 message (the last user message)
+  var low = 1
+  var high = conversationMessages.size
+  var bestCount = 1
+
+  while (low <= high) {
+    val mid = (low + high) / 2
+    val candidateMessages = conversationMessages.takeLast(mid)
+    val candidateTokenCount = estimateMessageListTokenCount(
+      if (systemMessage != null) listOf(systemMessage) + candidateMessages else candidateMessages,
+      tools
+    )
+
+    if (candidateTokenCount <= maxTokens - reservedTokens) {
+      bestCount = mid
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+
+  val resultMessages = conversationMessages.takeLast(bestCount)
+  return if (systemMessage != null) {
+    listOf(systemMessage) + resultMessages
+  } else {
+    resultMessages
+  }
+}
 
 /** Internal helper used to parse a tool call emitted by the model. */
 @Serializable
@@ -110,8 +285,25 @@ class InferenceApiServer(
           return@post
         }
 
-        // Build the prompt from the message history, injecting tool schemas when present.
-        val prompt = buildPrompt(request.messages, request.tools)
+        // Get the model's max tokens and truncate messages if needed
+        // Use the smaller of the model's max or the request's max_tokens (if specified)
+        val modelMaxTokens = bridge.getActiveModelMaxTokens()
+        val effectiveMaxTokens = request.maxTokens?.let {
+          Math.min(it, modelMaxTokens)
+        } ?: modelMaxTokens
+        val truncatedMessages = truncateMessagesToFit(
+          request.messages,
+          request.tools,
+          effectiveMaxTokens
+        )
+        // Log if truncation occurred
+        if (truncatedMessages.size < request.messages.size) {
+          Log.w(TAG, "Truncated ${request.messages.size - truncatedMessages.size} messages " +
+            "to fit within ${effectiveMaxTokens} token limit")
+        }
+
+        // Build the prompt from the (possibly truncated) message history, injecting tool schemas when present.
+        val prompt = buildPrompt(truncatedMessages, request.tools)
         val modelId = bridge.getActiveModelId() ?: request.model
         val completionId = "chatcmpl-${UUID.randomUUID()}"
         val created = System.currentTimeMillis() / 1000L
@@ -120,6 +312,9 @@ class InferenceApiServer(
           // ----------------------------------------------------------------
           // Streaming response — Server-Sent Events
           // ----------------------------------------------------------------
+          // Extract images from messages for multimodal input
+          val images = extractImagesFromMessages(truncatedMessages)
+          
           call.respondTextWriter(ContentType.Text.EventStream) {
             // First chunk: role announcement
             val roleChunk = ChatCompletionChunk(
@@ -145,6 +340,7 @@ class InferenceApiServer(
 
             bridge.runInference(
               input = prompt,
+              images = images,
               onToken = { token, done ->
                 if (!done) {
                   if (!firstTokenReceived) {
@@ -254,9 +450,13 @@ class InferenceApiServer(
           // ----------------------------------------------------------------
           val fullResponse = StringBuilder()
           var inferenceError: String? = null
+          
+          // Extract images from messages for multimodal input
+          val images = extractImagesFromMessages(truncatedMessages)
 
           bridge.runInference(
             input = prompt,
+            images = images,
             onToken = { token, _ -> fullResponse.append(token) },
             onError = { msg -> inferenceError = msg },
           )
@@ -315,7 +515,10 @@ class InferenceApiServer(
                 choices = listOf(
                   ChatCompletionChoice(
                     index = 0,
-                    message = ChatMessage(role = "assistant", content = responseText),
+                    message = ChatMessage(
+                      role = "assistant",
+                      content = MessageContent.TextContent(responseText)
+                    ),
                     finishReason = "stop",
                   )
                 ),
@@ -361,7 +564,7 @@ class InferenceApiServer(
     for (msg in messages) {
       when (msg.role) {
         "system" -> {
-          sb.append("[System]: ${msg.content ?: ""}")
+          sb.append("[System]: ${msg.content.toText()}")
           if (!tools.isNullOrEmpty()) {
             sb.append(
               "\n\n## Tool Use\n" +
@@ -386,11 +589,11 @@ class InferenceApiServer(
             val call = msg.toolCalls[0]
             sb.append("[Assistant]: {\"name\": \"${call.function.name}\", \"arguments\": ${call.function.arguments ?: "{}"}}")
           } else {
-            sb.append("[Assistant]: ${msg.content ?: ""}")
+            sb.append("[Assistant]: ${msg.content.toText()}")
           }
         }
-        "tool" -> sb.append("[Tool result (${msg.toolCallId ?: "unknown"})]: ${msg.content ?: ""}")
-        else -> sb.append("[User]: ${msg.content ?: ""}")
+        "tool" -> sb.append("[Tool result (${msg.toolCallId ?: "unknown"})]: ${msg.content.toText()}")
+        else -> sb.append("[User]: ${msg.content.toText()}")
       }
       sb.append("\n")
     }

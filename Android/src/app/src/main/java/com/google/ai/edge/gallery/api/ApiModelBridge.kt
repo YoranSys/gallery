@@ -75,6 +75,10 @@ class ApiModelBridge @Inject constructor(
 
   fun getActiveModelId(): String? = activeRef.get()?.model?.name
 
+  fun getActiveModelMaxTokens(): Int {
+    return activeRef.get()?.model?.llmMaxToken ?: 4000
+  }
+
   // ---------------------------------------------------------------------------
   // Auto-load
   // ---------------------------------------------------------------------------
@@ -100,7 +104,7 @@ class ApiModelBridge @Inject constructor(
           context = context,
           model = entry.model,
           taskId = "llm_chat",
-          supportImage = false,
+          supportImage = true,
           supportAudio = false,
           onDone = { errorMessage ->
             if (errorMessage.isEmpty()) {
@@ -127,12 +131,14 @@ class ApiModelBridge @Inject constructor(
    * @param onToken     Called for each partial result token (content, isDone).
    * @param onError     Called if inference fails or no model is available.
    * @param timeoutMs   Maximum time to wait for a response (default 5 minutes).
+   * @param images      Optional list of images to include as input context.
    */
   suspend fun runInference(
     input: String,
     onToken: suspend (token: String, done: Boolean) -> Unit,
     onError: suspend (message: String) -> Unit,
     timeoutMs: Long = 5 * 60 * 1000L,
+    images: List<android.graphics.Bitmap> = emptyList(),
   ) {
     val entry = activeRef.get()
     if (entry == null) {
@@ -183,6 +189,7 @@ class ApiModelBridge @Inject constructor(
           onError = { msg ->
             if (!deferred.isCompleted) deferred.completeExceptionally(Exception(msg))
           },
+          images = images,
         )
         deferred.await()
       }
