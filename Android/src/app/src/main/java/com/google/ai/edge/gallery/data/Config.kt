@@ -80,6 +80,7 @@ object ConfigKeys {
   val PREFILL_TOKENS = ConfigKey("prefill_tokens", "Prefill tokens")
   val DECODE_TOKENS = ConfigKey("decode_tokens", "Decode tokens")
   val NUMBER_OF_RUNS = ConfigKey("number_of_runs", "Number of runs")
+  val ENABLE_TTS = ConfigKey("enable_tts", "Enable Text-to-Speech")
 }
 
 /**
@@ -231,6 +232,7 @@ fun createLlmChatConfigs(
   accelerators: List<Accelerator> = DEFAULT_ACCELERATORS,
   supportThinking: Boolean = false,
   supportSpeculativeDecoding: Boolean = false,
+  supportTts: Boolean = false,
 ): List<Config> {
   var maxTokensConfig: Config =
     LabelConfig(key = ConfigKeys.MAX_TOKENS, defaultValue = "$defaultMaxToken")
@@ -283,6 +285,9 @@ fun createLlmChatConfigs(
     configs.add(
       BooleanSwitchConfig(key = ConfigKeys.ENABLE_SPECULATIVE_DECODING, defaultValue = false)
     )
+  }
+  if (supportTts) {
+    configs.add(BooleanSwitchConfig(key = ConfigKeys.ENABLE_TTS, defaultValue = false))
   }
   return configs
 }

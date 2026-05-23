@@ -24,6 +24,7 @@ package com.google.ai.edge.gallery.ui.common.chat
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -87,6 +88,7 @@ import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.firebaseAnalytics
+import com.google.ai.edge.gallery.customtasks.mobileactions.TtsViewModel
 import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
 import com.google.ai.edge.gallery.ui.common.copyBitmapToClipboard
 import com.google.ai.edge.gallery.ui.common.saveBitmapToMediaStore
@@ -124,6 +126,7 @@ fun ChatView(
   modifier: Modifier = Modifier,
   skillCount: Int = 0,
   mcpCount: Int = 0,
+  mobileActionsCount: Int = 0,
   onResetSessionClicked:
     (
       model: Model, initialMessages: List<ChatMessage>, clearHistory: Boolean, onDone: () -> Unit,
@@ -144,6 +147,7 @@ fun ChatView(
   curSystemPrompt: String = "",
   onSystemPromptChanged: (String) -> Unit = {},
   sendMessageTrigger: SendMessageTrigger? = null,
+  ttsViewModel: TtsViewModel? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -175,6 +179,19 @@ fun ChatView(
       )
     }
   }
+
+  // TTS: Speak the last model response when user clicks the speaker button
+  val onTtsSpeakClicked: (() -> Unit)? = if (ttsViewModel != null) {
+    remember(currentMessages) {
+      val lastAgent = currentMessages.lastOrNull { it.side == ChatSide.AGENT }
+      val text = (lastAgent as? ChatMessageText)?.content
+      if (text != null && text.isNotBlank()) {
+        { ttsViewModel.speakResponse(text) }
+      } else {
+        null
+      }
+    }
+  } else null
   val scope = rememberCoroutineScope()
   var navigatingUp by remember { mutableStateOf(false) }
 
@@ -310,6 +327,8 @@ fun ChatView(
               inProgress = uiState.inProgress,
               modelPreparing = uiState.preparing,
               shouldShowHistoryButton = true,
+              ttsViewModel = ttsViewModel,
+              onTtsSpeakClicked = onTtsSpeakClicked,
               onConfigChanged = { old, new ->
                 // Filter out config values that are not relevant to the task.
                 //
@@ -381,6 +400,7 @@ fun ChatView(
                       innerPadding = innerPadding,
                       skillCount = skillCount,
                       mcpCount = mcpCount,
+                      mobileActionsCount = mobileActionsCount,
                       navigateUp = navigateUp,
                       onSendMessage = { model, messages -> onSendMessage(model, messages) },
                       onRunAgainClicked = onRunAgainClicked,

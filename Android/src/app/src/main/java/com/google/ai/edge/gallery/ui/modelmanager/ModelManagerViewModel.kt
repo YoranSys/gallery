@@ -1215,6 +1215,7 @@ constructor(
     val llmSupportMobileActions = info.llmConfig.supportMobileActions
     val llmSupportThinking = info.llmConfig.supportThinking
     val llmSupportSpeculativeDecoding = info.llmConfig.supportSpeculativeDecoding
+    val llmSupportTts = info.llmConfig.supportTts
     val configs: MutableList<Config> =
       createLlmChatConfigs(
           defaultMaxToken = llmMaxToken,
@@ -1224,6 +1225,7 @@ constructor(
           accelerators = accelerators,
           supportThinking = llmSupportThinking,
           supportSpeculativeDecoding = llmSupportSpeculativeDecoding,
+          supportTts = llmSupportTts,
         )
         .toMutableList()
     val capabilities: MutableList<ModelCapability> = mutableListOf()

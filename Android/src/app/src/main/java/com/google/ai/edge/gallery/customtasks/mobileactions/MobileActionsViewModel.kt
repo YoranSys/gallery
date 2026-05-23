@@ -15,14 +15,17 @@
  */
 package com.google.ai.edge.gallery.customtasks.mobileactions
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.provider.Settings
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -265,6 +268,10 @@ constructor(@ApplicationContext private val appContext: Context) : ViewModel() {
       is CreateCalendarEventAction ->
         createCalendarEvent(context = context, datetime = action.datetime, title = action.title)
 
+      // Read calendar events.
+      is ReadCalendarEventsAction ->
+        readCalendarEvents(context = context, startDate = action.startDate, endDate = action.endDate)
+
       else -> ""
     }
   }
@@ -415,5 +422,70 @@ constructor(@ApplicationContext private val appContext: Context) : ViewModel() {
     }
 
     return ""
+  }
+
+  private fun readCalendarEvents(context: Context, startDate: String, endDate: String): String {
+    // Check if we have calendar read permission
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) !=
+        PackageManager.PERMISSION_GRANTED) {
+      Log.w(TAG, "Calendar read permission not granted")
+      return "Calendar read permission required"
+    }
+
+    // Convert date strings to milliseconds for query
+    val dateFormatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    
+    val startMs: Long
+    val endMs: Long
+    
+    try {
+      val startLocalDate = java.time.LocalDate.parse(startDate, dateFormatter)
+      val endLocalDate = java.time.LocalDate.parse(endDate, dateFormatter)
+      val systemDefaultZone = java.time.ZoneId.systemDefault()
+      startMs = startLocalDate.atStartOfDay(systemDefaultZone).toInstant().toEpochMilli()
+      endMs = endLocalDate.plusDays(1).atStartOfDay(systemDefaultZone).toInstant().toEpochMilli()
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to parse dates: startDate='$startDate', endDate='$endDate'", e)
+      return e.message ?: context.getString(R.string.unknown_error)
+    }
+
+    // Query calendar events
+    val cursor = context.contentResolver.query(
+      CalendarContract.Events.CONTENT_URI,
+      arrayOf(
+        CalendarContract.Events.TITLE,
+        CalendarContract.Events.DTSTART,
+        CalendarContract.Events.DTEND,
+        CalendarContract.Events.DESCRIPTION
+      ),
+      "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?",
+      arrayOf(startMs.toString(), endMs.toString()),
+      null
+    )
+
+    val events = mutableListOf<String>()
+    cursor?.use {
+      while (it.moveToNext()) {
+        val title = it.getString(0)
+        val dtStart = it.getLong(1)
+        val dtEnd = it.getLong(2)
+        val description = it.getString(3) ?: ""
+        events.add("Event: $title (${java.time.Instant.ofEpochMilli(dtStart)} to ${java.time.Instant.ofEpochMilli(dtEnd)}) - $description")
+      }
+    }
+
+    if (events.isEmpty()) {
+      return "No calendar events found between $startDate and $endDate"
+    }
+
+    return events.joinToString("\n")
+  }
+}
+
+// Utility object for static access to action execution
+object MobileActionsHelper {
+  fun performAction(action: Action, context: Context): String {
+    val tempViewModel = MobileActionsViewModel(context)
+    return tempViewModel.performAction(action, context)
   }
 }

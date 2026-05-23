@@ -16,7 +16,15 @@
         "maxTokens": 4096,
         "accelerators": "cpu,gpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image"]
+      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image"],
+      "extraDataFiles": [
+        {
+          "name": "whisper_model",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+          "downloadFileName": "ggml-tiny.bin",
+          "sizeInBytes": 77691713
+        }
+      ]
     },
     {
       "name": "Gemma-3n-E4B-it-int4",
@@ -34,7 +42,15 @@
         "maxTokens": 4096,
         "accelerators": "cpu,gpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image"]
+      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image"],
+      "extraDataFiles": [
+        {
+          "name": "whisper_model",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+          "downloadFileName": "ggml-tiny.bin",
+          "sizeInBytes": 77691713
+        }
+      ]
     },
     {
       "name": "Gemma3-1B-IT q4",
@@ -51,7 +67,15 @@
         "maxTokens": 1024,
         "accelerators": "gpu,cpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab"]
+      "taskTypes": ["llm_chat", "llm_prompt_lab"],
+      "extraDataFiles": [
+        {
+          "name": "whisper_model",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+          "downloadFileName": "ggml-tiny.bin",
+          "sizeInBytes": 77691713
+        }
+      ]
     },
     {
       "name": "Qwen2.5-1.5B-Instruct q8",
@@ -68,7 +92,15 @@
         "maxTokens": 1024,
         "accelerators": "cpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab"]
+      "taskTypes": ["llm_chat", "llm_prompt_lab"],
+      "extraDataFiles": [
+        {
+          "name": "whisper_model",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+          "downloadFileName": "ggml-tiny.bin",
+          "sizeInBytes": 77691713
+        }
+      ]
     }
   ]
 }

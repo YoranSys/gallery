@@ -40,6 +40,10 @@ android {
     versionCode = 32
     versionName = "1.0.14"
 
+    ndk {
+      abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+    }
+
     // Needed for HuggingFace auth workflows.
     // Use the scheme of the "Redirect URLs" in HuggingFace app.
     manifestPlaceholders["appAuthRedirectScheme"] =
@@ -68,6 +72,12 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+  ndkVersion = "27.0.12077973"
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+    }
   }
 }
 

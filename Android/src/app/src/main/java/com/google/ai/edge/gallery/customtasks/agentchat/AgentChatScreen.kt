@@ -83,6 +83,8 @@ import com.google.ai.edge.gallery.common.LOCAL_URL_BASE
 import com.google.ai.edge.gallery.common.PermissionResult
 import com.google.ai.edge.gallery.common.RequestPermissionAgentAction
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
+import com.google.ai.edge.gallery.customtasks.mobileactions.MobileActionsViewModel
+import com.google.ai.edge.gallery.customtasks.mobileactions.TtsViewModel
 import com.google.ai.edge.gallery.data.AgentSkillsURLs
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
@@ -128,6 +130,8 @@ fun AgentChatScreen(
   viewModel: LlmChatViewModel = hiltViewModel(),
   skillManagerViewModel: SkillManagerViewModel = hiltViewModel(),
   mcpManagerViewModel: McpManagerViewModel = hiltViewModel(),
+  mobileActionsViewModel: MobileActionsViewModel = hiltViewModel(),
+  ttsViewModel: TtsViewModel = hiltViewModel(),
   initialQuery: String? = null,
 ) {
   val context = LocalContext.current
@@ -136,6 +140,9 @@ fun AgentChatScreen(
   agentTools.skillManagerViewModel = skillManagerViewModel
   agentTools.mcpManagerViewModel = mcpManagerViewModel
   agentTools.taskId = task.id
+  agentTools.onMobileAction = { action: com.google.ai.edge.gallery.customtasks.mobileactions.Action ->
+    mobileActionsViewModel.performAction(action, context)
+  }
   val density = LocalDensity.current
   val windowInfo = LocalWindowInfo.current
   val screenWidthDp = remember { with(density) { windowInfo.containerSize.width.toDp() } }
@@ -180,6 +187,8 @@ fun AgentChatScreen(
     mcpUiState.mcpServers
       .filter { it.mcpServer.enabled }
       .sumOf { it.mcpServer.toolsList.count { tool -> tool.enabled } }
+  // Mobile actions are always available (8 built-in actions)
+  val mobileActionsCount = 8
 
   val selectedModel = modelManagerUiState.selectedModel
   val modelInitStatus = modelManagerUiState.modelInitializationStatus[selectedModel.name]
@@ -216,6 +225,8 @@ fun AgentChatScreen(
     skillCount = skillCount,
     mcpCount = mcpCount,
     mcpToolsCount = mcpToolsCount,
+    mobileActionsCount = mobileActionsCount,
+    ttsViewModel = ttsViewModel,
     onFirstToken = { model ->
       scope.launch(Dispatchers.Main) {
         updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
@@ -768,7 +779,7 @@ private fun resetSessionWithCurrentSkillsAndMcps(
       injectSkillsAndMcpTools(
         baseSystemPrompt = curSystemPrompt,
         skills = skillManagerViewModel.getSelectedSkills(),
-        toolsPrompt = agentTools.mcpManagerViewModel.getToolsPrompt(),
+        toolsPrompt = agentTools.getSafeCombinedToolsPrompt(),
       ),
     tools = listOf(tool(agentTools)),
     supportImage = true,

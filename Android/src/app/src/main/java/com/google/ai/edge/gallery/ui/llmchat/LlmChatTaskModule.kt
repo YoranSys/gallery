@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -41,6 +42,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.customtasks.common.CustomTask
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTask
+import com.google.ai.edge.gallery.customtasks.mobileactions.Action
+import com.google.ai.edge.gallery.customtasks.mobileactions.MobileActionsHelper
+import com.google.ai.edge.gallery.customtasks.mobileactions.MobileActionsTools
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.Model
@@ -48,12 +52,18 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.runtime.runtimeHelper
 import com.google.ai.edge.gallery.ui.theme.emptyStateContent
 import com.google.ai.edge.gallery.ui.theme.emptyStateTitle
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.ToolProvider
+import com.google.ai.edge.litertlm.tool
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoSet
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 
@@ -83,6 +93,12 @@ class LlmChatTask @Inject constructor() : CustomTask {
     systemInstruction: Contents?,
     onDone: (String) -> Unit,
   ) {
+    // Create mobile actions tools with a callback that executes actions immediately
+    val mobileActionsTools = MobileActionsTools(onFunctionCalled = { action ->
+      MobileActionsHelper.performAction(action, context)
+    })
+    val tools: List<ToolProvider> = listOf(tool(mobileActionsTools))
+    
     model.runtimeHelper.initialize(
       context = context,
       model = model,
@@ -91,7 +107,9 @@ class LlmChatTask @Inject constructor() : CustomTask {
       supportAudio = false,
       onDone = onDone,
       coroutineScope = coroutineScope,
-      systemInstruction = systemInstruction,
+      systemInstruction = getSystemPrompt(),
+      tools = tools,
+      enableConversationConstrainedDecoding = true,
     )
   }
 
@@ -111,12 +129,14 @@ class LlmChatTask @Inject constructor() : CustomTask {
     LaunchedEffect(task) { viewModel.loadSystemPrompt(task) }
     val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsState()
     val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
+    val mobileActionsCount = remember { 8 }
     LlmChatScreen(
       modelManagerViewModel = myData.modelManagerViewModel,
       navigateUp = myData.onNavUp,
       viewModel = viewModel,
       allowEditingSystemPrompt = true,
       curSystemPrompt = uiSystemPrompt,
+      mobileActionsCount = mobileActionsCount,
       onSystemPromptChanged = { newPrompt ->
         val selectedModel = myData.modelManagerViewModel.uiState.value.selectedModel
         viewModel.applySystemPromptChange(
@@ -144,6 +164,36 @@ class LlmChatTask @Inject constructor() : CustomTask {
           }
         }
       },
+    )
+  }
+
+  private fun getSystemPrompt(): Contents {
+    val now = LocalDateTime.now()
+    val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+    val dateStr = now.format(dateFormatter)
+    val timeStr = now.format(timeFormatter)
+    val dayOfWeek = now.dayOfWeek.toString()
+    
+    return Contents.of(
+      listOf(
+        "You are a model that can do function calling with the following functions",
+        "Current date: $dateStr",
+        "Current time: $timeStr",
+        "Day of week: $dayOfWeek",
+        "You can also perform the following device actions:",
+        "",
+        "- turnOnFlashlight: Turns the device flashlight on",
+        "- turnOffFlashlight: Turns the device flashlight off",
+        "- createContact: Creates a contact (firstName, lastName, phoneNumber, email)",
+        "- sendEmail: Sends an email (to, subject, body)",
+        "- showLocationOnMap: Shows a location on the map (location)",
+        "- openWifiSettings: Opens the WiFi settings",
+        "- createCalendarEvent: Creates a calendar event (datetime in YYYY-MM-DDTHH:MM:SS format, title). Use current date/time as reference for relative dates like 'tomorrow'.",
+        "- readCalendarEvents: Reads calendar events (startDate in YYYY-MM-DD format, endDate in YYYY-MM-DD format). Requires READ_CALENDAR permission.",
+        "",
+        "IMPORTANT: Use device action tools ONLY when explicitly requested.",
+      ).map { Content.Text(it) }
     )
   }
 }

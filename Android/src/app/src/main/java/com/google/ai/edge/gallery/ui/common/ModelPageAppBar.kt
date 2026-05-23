@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,6 +53,7 @@ import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelCapability
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
+import com.google.ai.edge.gallery.customtasks.mobileactions.TtsViewModel
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.convertValueToTargetType
@@ -79,6 +81,8 @@ fun ModelPageAppBar(
   onSystemPromptChanged: (String) -> Unit = {},
   shouldShowHistoryButton: Boolean = false,
   onHistoryClicked: (Model) -> Unit = {},
+  ttsViewModel: TtsViewModel? = null,
+  onTtsSpeakClicked: (() -> Unit)? = null,
 ) {
   var showConfigDialog by remember { mutableStateOf(false) }
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -141,18 +145,23 @@ fun ModelPageAppBar(
     actions = {
       val downloadSucceeded = curDownloadStatus?.status == ModelDownloadStatusType.SUCCEEDED
       val showConfigButton = model.configs.isNotEmpty() && downloadSucceeded
-      Box(modifier = Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-        var configButtonOffset = 0.dp
-        if (showConfigButton && shouldShowHistoryButton) {
-          configButtonOffset = (-40).dp
-        }
+      val showTtsButton = onTtsSpeakClicked != null && downloadSucceeded
+      
+      // Layout buttons with proper offsetting
+      val buttonCount = (if (showConfigButton) 1 else 0) + (if (shouldShowHistoryButton) 1 else 0) + (if (showTtsButton) 1 else 0)
+      val buttonWidth = 42.dp
+      
+      Row(
+        modifier = Modifier.size(width = buttonWidth * buttonCount, height = buttonWidth),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End,
+      ) {
         if (showConfigButton) {
           val enableConfigButton = !isModelInitializing && !inProgress && isModelInitialized
           IconButton(
             onClick = { showConfigDialog = true },
             enabled = enableConfigButton,
-            modifier =
-              Modifier.offset(x = configButtonOffset).alpha(if (!enableConfigButton) 0.5f else 1f),
+            modifier = Modifier.alpha(if (!enableConfigButton) 0.5f else 1f),
           ) {
             Icon(
               imageVector = Icons.Rounded.Tune,
@@ -174,6 +183,22 @@ fun ModelPageAppBar(
               imageVector = Icons.Rounded.History,
               contentDescription = stringResource(R.string.cd_chat_history),
               tint = MaterialTheme.colorScheme.onSurface,
+              modifier = Modifier.size(20.dp),
+            )
+          }
+        }
+        if (showTtsButton) {
+          val isSpeaking = ttsViewModel?.isSpeaking?.collectAsState()?.value ?: false
+          val enableTtsButton = !isModelInitializing && !inProgress && isModelInitialized
+          IconButton(
+            onClick = { onTtsSpeakClicked?.invoke() },
+            enabled = enableTtsButton,
+            modifier = Modifier.alpha(if (!enableTtsButton) 0.5f else 1f),
+          ) {
+            Icon(
+              imageVector = Icons.Rounded.VolumeUp,
+              contentDescription = if (isSpeaking) "Speaking" else "Speak response",
+              tint = if (isSpeaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
               modifier = Modifier.size(20.dp),
             )
           }

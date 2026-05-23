@@ -27,6 +27,7 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
+import kotlinx.serialization.ExperimentalSerializationApi
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -77,7 +78,6 @@ private fun MessageContent?.toText(): String {
         when (part) {
           is TextPart -> part.text
           is ImageUrlPart -> "[Image]"
-          else -> ""
         }
       }
     }
@@ -233,16 +233,335 @@ private data class ParsedToolCall(
 /**
  * Lightweight Ktor (CIO) HTTP server that exposes an OpenAI-compatible chat completions API,
  * routing requests to [ApiModelBridge].
+ * 
+ * @param bridge The model bridge for inference
+ * @param getApiKey Function to get the API key for authentication
+ * @param port The port to listen on
+ * @param enableToolCallRepairLoop If true, when a malformed tool call cannot be auto-fixed,
+ *   the server will send it back to the model asking for repair (Tier 3). Default: false.
+ * @param maxRepairRetries Maximum number of repair attempts before giving up. Default: 1.
  */
 class InferenceApiServer(
   private val bridge: ApiModelBridge,
   private val getApiKey: () -> String?,
   port: Int = DEFAULT_API_PORT,
+  private val enableToolCallRepairLoop: Boolean = true,
+  private val maxRepairRetries: Int = 1,
 ) {
   private val json = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
     explicitNulls = false
+  }
+
+  /** Maximum depth of recursive repair attempts to prevent infinite loops. */
+  private var currentRepairDepth: Int = 0
+
+  /**
+   * Validation result for tool call JSON structure.
+   */
+  private data class ToolCallValidationResult(
+    val isValid: Boolean,
+    val repairedText: String? = null,
+    val error: String? = null
+  )
+
+  /**
+   * Represents a request for the model to repair a malformed tool call.
+   */
+  private data class RepairRequest(
+    val malformedText: String,
+    val error: String,
+    val retryCount: Int
+  )
+
+  /**
+   * Tier 1: Validates that a string has balanced braces, brackets, and quotes.
+   * Returns the validation result with optional repair for simple issues.
+   */
+  private fun validateJsonStructure(text: String): ToolCallValidationResult {
+    val trimmed = text.trim()
+    
+    // Quick check: must start with {
+    if (!trimmed.startsWith("{")) {
+      return ToolCallValidationResult(
+        isValid = false,
+        error = "Does not start with opening brace"
+      )
+    }
+    
+    // Count braces, brackets, and quotes
+    var braceCount = 0
+    var bracketCount = 0
+    var quoteCount = 0
+    var escapeNext = false
+    var inString = false
+    
+    for (char in trimmed) {
+      if (escapeNext) {
+        escapeNext = false
+        continue
+      }
+      
+      when (char) {
+        '\\' -> escapeNext = true
+        '"' -> {
+          if (!inString) {
+            quoteCount++
+            inString = true
+          } else {
+            quoteCount++
+            inString = false
+          }
+        }
+        '{' -> if (!inString) braceCount++
+        '}' -> if (!inString) braceCount--
+        '[' -> if (!inString) bracketCount++
+        ']' -> if (!inString) bracketCount--
+      }
+    }
+    
+    // Check if balanced
+    val braceBalanced = braceCount == 0
+    val bracketBalanced = bracketCount == 0
+    val quoteBalanced = quoteCount % 2 == 0
+    
+    if (braceBalanced && bracketBalanced && quoteBalanced) {
+      return ToolCallValidationResult(isValid = true)
+    }
+    
+    // Tier 2: Attempt auto-fix for common issues
+    val repaired = attemptJsonRepair(trimmed, braceCount, bracketCount, quoteCount)
+    if (repaired != null) {
+      return ToolCallValidationResult(
+        isValid = true,
+        repairedText = repaired
+      )
+    }
+    
+    // Build error message
+    val errors = mutableListOf<String>()
+    if (!braceBalanced) errors.add("unbalanced braces ($braceCount)")
+    if (!bracketBalanced) errors.add("unbalanced brackets ($bracketCount)")
+    if (!quoteBalanced) errors.add("unbalanced quotes ($quoteCount)")
+    
+    return ToolCallValidationResult(
+      isValid = false,
+      error = "Malformed JSON: " + errors.joinToString(", ")
+    )
+  }
+
+  /**
+   * Tier 2: Attempts to repair common JSON issues.
+   * Handles: extra opening/closing braces, brackets, unescaped quotes.
+   */
+  private fun attemptJsonRepair(
+    text: String,
+    braceCount: Int,
+    bracketCount: Int,
+    quoteCount: Int
+  ): String? {
+    var repaired = text
+    
+    // Fix extra closing braces
+    if (braceCount < 0) {
+      var closeBracesToRemove = -braceCount
+      var lastIndex = repaired.length - 1
+      while (closeBracesToRemove > 0 && lastIndex >= 0) {
+        if (repaired[lastIndex] == '}') {
+          repaired = repaired.removeRange(lastIndex, lastIndex + 1)
+          closeBracesToRemove--
+        }
+        lastIndex--
+      }
+    }
+    
+    // Fix missing closing braces
+    if (braceCount > 0) {
+      repeat(braceCount) {
+        repaired += "}"
+      }
+    }
+    
+    // Fix extra closing brackets
+    if (bracketCount < 0) {
+      var closeBracketsToRemove = -bracketCount
+      var lastIndex = repaired.length - 1
+      while (closeBracketsToRemove > 0 && lastIndex >= 0) {
+        if (repaired[lastIndex] == ']') {
+          repaired = repaired.removeRange(lastIndex, lastIndex + 1)
+          closeBracketsToRemove--
+        }
+        lastIndex--
+      }
+    }
+    
+    // Fix missing closing brackets
+    if (bracketCount > 0) {
+      repeat(bracketCount) {
+        repaired += "]"
+      }
+    }
+    
+    // Fix unbalanced quotes by adding missing closing quote
+    if (quoteCount % 2 != 0) {
+      repaired += '"'
+    }
+    
+    // Try to parse the repaired version to see if it's valid
+    return try {
+      json.decodeFromString<ParsedToolCall>(repaired.trim())
+      repaired.trim()
+    } catch (_: Exception) {
+      // If we can't parse it, try a more aggressive repair
+      tryAggressiveJsonRepair(repaired)
+    }
+  }
+
+  /**
+   * More aggressive JSON repair: try to extract valid JSON from malformed text.
+   */
+  private fun tryAggressiveJsonRepair(text: String): String? {
+    val trimmed = text.trim()
+    
+    // Try to find the first valid JSON object in the text
+    // This handles cases where there's extra text before/after the JSON
+    val jsonPattern = Regex("\\{[^{}]*\\}")
+    val matches = jsonPattern.findAll(trimmed).toList()
+    
+    // Try each potential JSON object
+    for (match in matches) {
+      val candidate = match.value
+      try {
+        // Check if it has both name and arguments
+        if (candidate.contains("\"name\"") && candidate.contains("\"arguments\"")) {
+          json.decodeFromString<ParsedToolCall>(candidate)
+          return candidate
+        }
+      } catch (_: Exception) {
+        continue
+      }
+    }
+    
+    // Try to extract everything between the first { and last }
+    val firstBrace = trimmed.indexOf('{')
+    val lastBrace = trimmed.lastIndexOf('}')
+    
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      val extracted = trimmed.substring(firstBrace, lastBrace + 1)
+      // Try to fix by ensuring we have the required fields
+      if (extracted.contains("\"name\"")) {
+        // Add arguments if missing
+        val withArguments = if (extracted.contains("\"arguments\"")) {
+          extracted
+        } else {
+          extracted.dropLast(1) + ", \"arguments\": {}}"
+        }
+        try {
+          json.decodeFromString<ParsedToolCall>(withArguments)
+          return withArguments
+        } catch (_: Exception) {
+          // Last resort: return original with added closing brace
+          return trimmed + "}"
+        }
+      }
+    }
+    
+    return null
+  }
+
+  /**
+   * Tier 3: Attempts to use the model itself to repair a malformed tool call.
+   * This sends the malformed JSON back to the model with a repair instruction.
+   * Only used when auto-fix fails and enableToolCallRepairLoop is true.
+   * 
+   * @param malformedText The malformed tool call text
+   * @param validationError The validation error description
+   * @return The repaired tool call text, or null if repair failed
+   */
+  @OptIn(ExperimentalSerializationApi::class)
+  private suspend fun attemptModelRepair(
+    malformedText: String,
+    validationError: String
+  ): String? {
+    // Prevent infinite loops
+    if (currentRepairDepth >= maxRepairRetries) {
+      Log.w(TAG, "Max repair depth ($maxRepairRetries) reached. Giving up on tool call repair.")
+      return null
+    }
+    
+    if (!enableToolCallRepairLoop) {
+      return null
+    }
+    
+    currentRepairDepth++
+    
+    try {
+      // Build repair prompt
+      val repairPrompt = buildRepairPrompt(malformedText, validationError)
+      
+      Log.i(TAG, "Attempting model repair for tool call. Retry #$currentRepairDepth")
+      
+      // Run inference with the repair prompt
+      val repairedText = StringBuilder()
+      var inferenceError: String? = null
+      
+      bridge.runInference(
+        input = repairPrompt,
+        images = emptyList(),
+        onToken = { token, _ -> repairedText.append(token) },
+        onError = { msg -> inferenceError = msg },
+      )
+      
+      if (inferenceError != null) {
+        Log.e(TAG, "Repair inference failed: ${inferenceError}")
+        return null
+      }
+      
+      val result = repairedText.toString().trim()
+      
+      // Validate the repair result
+      val validation = validateJsonStructure(result)
+      if (validation.isValid) {
+        // Try to parse it
+        return try {
+          json.decodeFromString<ParsedToolCall>(validation.repairedText ?: result)
+          validation.repairedText ?: result
+        } catch (_: Exception) {
+          // If parsing still fails, try once more with the original tryParseToolCall
+          tryParseToolCall(result)?.let { result }
+        }
+      } else {
+        // Repair failed - try recursive repair (up to maxRepairRetries)
+        Log.w(TAG, "Repair attempt failed: ${validation.error}")
+        return attemptModelRepair(result, validation.error ?: "Unknown error")
+      }
+    } finally {
+      currentRepairDepth--
+    }
+  }
+
+  /**
+   * Builds a repair prompt that instructs the model to fix a malformed tool call.
+   */
+  private fun buildRepairPrompt(malformedText: String, error: String): String {
+    return """
+      |You emitted a malformed tool call. The error was: $error
+      |
+      |Malformed tool call:
+      |$malformedText
+      |
+      |Please fix the JSON and return ONLY the corrected tool call JSON object.
+      |Do NOT add any explanation, markdown, or other text. Return ONLY the valid JSON.
+      |The tool call must be in the format: {"name": "<tool_name>", "arguments": {...}}
+      |""".trimMargin()
+  }
+
+  /**
+   * Resets the repair depth counter. Should be called at the start of each request.
+   */
+  private fun resetRepairDepth() {
+    currentRepairDepth = 0
   }
 
   private val server: EmbeddedServer<*, *> = embeddedServer(CIO, port = port) {
@@ -470,7 +789,8 @@ class InferenceApiServer(
           }
 
           val responseText = fullResponse.toString()
-          val parsed = if (!request.tools.isNullOrEmpty()) tryParseToolCall(responseText) else null
+          resetRepairDepth()
+          val parsed = if (!request.tools.isNullOrEmpty()) tryParseToolCallWithRepair(responseText) else null
 
           if (parsed != null) {
             val callId = "call_${UUID.randomUUID().toString().replace("-", "").take(16)}"
@@ -602,15 +922,88 @@ class InferenceApiServer(
 
   /**
    * Tries to parse [text] as a model-emitted tool call in the format
-   * `{"name": "...", "arguments": {...}}`.  Returns null if [text] is not a valid tool call.
+   * `{"name": "...", "arguments": {...}}`. 
+   * 
+   * Implements Tier 1 (validation) and Tier 2 (auto-fix):
+   * - Validates JSON structure (balanced braces, brackets, quotes)
+   * - Attempts automatic repair for common malformations
+   * - Falls back to null if repair fails
+   * 
+   * Returns null if [text] is not a valid or fixable tool call.
    */
+  @OptIn(ExperimentalSerializationApi::class)
   private fun tryParseToolCall(text: String): ParsedToolCall? {
     val trimmed = text.trim()
+    
+    // First, try direct parsing (fast path for valid JSON)
     return try {
       json.decodeFromString<ParsedToolCall>(trimmed)
     } catch (_: Exception) {
-      null
+      // Tier 1 + Tier 2: Validate and attempt repair
+      val validation = validateJsonStructure(text)
+      when {
+        validation.isValid && validation.repairedText != null -> {
+          // Successfully repaired - try parsing the repaired version
+          try {
+            json.decodeFromString<ParsedToolCall>(validation.repairedText)
+          } catch (_: Exception) {
+            null
+          }
+        }
+        validation.isValid -> {
+          // Validation passed but parsing still failed - might be semantic issue
+          // Try once more with lenient parsing
+          try {
+            // Create a lenient JSON parser
+            val lenientJson = Json {
+              ignoreUnknownKeys = true
+              isLenient = true
+              allowTrailingComma = true
+            }
+            lenientJson.decodeFromString<ParsedToolCall>(trimmed)
+          } catch (_: Exception) {
+            null
+          }
+        }
+        else -> {
+          // Validation failed and couldn't auto-fix
+          Log.w(TAG, "Tool call validation failed: ${validation.error}. Text: ${text.take(200)}")
+          null
+        }
+      }
     }
+  }
+
+  /**
+   * Suspend version of tryParseToolCall that includes Tier 3 (model repair loop).
+   * 
+   * Implements all three tiers:
+   * - Tier 1: Validation (balanced braces, brackets, quotes)
+   * - Tier 2: Auto-fix for common malformations
+   * - Tier 3: Model repair loop (if enabled)
+   * 
+   * Returns null if [text] is not a valid, fixable, or repairable tool call.
+   */
+  @OptIn(ExperimentalSerializationApi::class)
+  private suspend fun tryParseToolCallWithRepair(text: String): ParsedToolCall? {
+    // First try the standard parsing with Tier 1 + Tier 2
+    val result = tryParseToolCall(text)
+    if (result != null) {
+      return result
+    }
+    
+    // Tier 3: Try model repair loop
+    if (enableToolCallRepairLoop) {
+      val validation = validateJsonStructure(text)
+      if (!validation.isValid && validation.error != null) {
+        val repairedText = attemptModelRepair(text, validation.error)
+        if (repairedText != null) {
+          return tryParseToolCall(repairedText)
+        }
+      }
+    }
+    
+    return null
   }
 
   private suspend fun java.io.Writer.emit(text: String) {

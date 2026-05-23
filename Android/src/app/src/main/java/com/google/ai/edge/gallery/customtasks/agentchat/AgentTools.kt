@@ -35,6 +35,8 @@ import com.google.ai.edge.gallery.common.PermissionResult
 import com.google.ai.edge.gallery.common.RequestPermissionAgentAction
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.common.convertStringToJsonObject
+import com.google.ai.edge.gallery.customtasks.mobileactions.Action
+import com.google.ai.edge.gallery.customtasks.mobileactions.MobileActionsTools
 import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
@@ -56,10 +58,55 @@ open class AgentTools() : ToolSet {
   lateinit var mcpManagerViewModel: McpManagerViewModel
   lateinit var taskId: String
 
+  // Callback for handling mobile actions from AgentTools
+  var onMobileAction: ((Action) -> Unit)? = null
+
   private val _actionChannel = Channel<AgentAction>(Channel.UNLIMITED)
   val actionChannel: ReceiveChannel<AgentAction> = _actionChannel
   var resultImageToShow: CallJsSkillResultImage? = null
   var resultWebviewToShow: CallJsSkillResultWebview? = null
+
+  /**
+   * Generates a combined prompt string describing all available tools.
+   * This is used to inject tool information into the system prompt.
+   */
+  fun getSafeCombinedToolsPrompt(): String {
+    // Get MCP tools prompt
+    val mcpToolsPrompt = mcpManagerViewModel.getToolsPrompt()
+    
+    // Get mobile actions tools prompt
+    val mobileActionsTools = MobileActionsTools { action ->
+      onMobileAction?.invoke(action)
+    }
+    val mobileActionsPrompt = buildString {
+      // Use reflection to get all @Tool annotated methods and their descriptions
+      // Since ToolSet doesn't provide a direct API, we manually list the tools
+      // from MobileActionsTools
+      appendLine("Mobile Actions Tools:")
+      appendLine("Use these tools ONLY when the user explicitly asks for device actions.")
+      appendLine("- turnOnFlashlight: Turns the device flashlight on")
+      appendLine("- turnOffFlashlight: Turns the device flashlight off")
+      appendLine("- createContact(firstName, lastName, phoneNumber, email): Creates a contact")
+      appendLine("- sendEmail(to, subject, body): Sends an email")
+      appendLine("- showLocationOnMap(location): Shows a location on the map")
+      appendLine("- openWifiSettings: Opens the WiFi settings")
+      appendLine("- createCalendarEvent(datetime, title): Creates a calendar event")
+      appendLine("- readCalendarEvents(startDate, endDate): Reads calendar events")
+    }
+
+    // Web browsing tool
+    val webBrowsingPrompt = buildString {
+      appendLine("Web Browsing Tools:")
+      appendLine("Use these tools ONLY when the user explicitly asks to browse/visit/open a website or URL.")
+      appendLine("- browseWeb(url, maxChars=2000): Browse a webpage by URL and return simplified text content. " +
+        "The URL must include http:// or https://. For web searches, construct a search engine URL first.")
+    }
+    
+    // Combine all tool prompts
+    return listOf(mcpToolsPrompt, mobileActionsPrompt, webBrowsingPrompt)
+      .filter { it.isNotBlank() }
+      .joinToString("\n\n")
+  }
 
   /** Loads skill. */
   @Tool(description = "Loads a skill.")
@@ -422,6 +469,78 @@ open class AgentTools() : ToolSet {
         }
       },
     )
+  }
+
+  /**
+   * Browse a webpage and return simplified content for the model to process.
+   * Uses WebView to load the page, then extracts and simplifies the main content.
+   * 
+   * ONLY use this tool when the user explicitly requests to:
+   * - browse a website
+   * - visit a URL
+   * - open a webpage
+   * - read content from a web page
+   * - search the web (you must construct a search URL first, e.g., https://www.google.com/search?q=...)
+   * 
+   * Do NOT use this for device actions like flashlight, contacts, email, calendar, etc.
+   */
+  @Tool(
+    description = "Browse a webpage by URL and return its simplified text content. " +
+      "Use this ONLY when the user explicitly asks to browse/open/visit a website or URL. " +
+      "Returns clean text without ads, navigation, or boilerplate. " +
+      "If the user wants to search, first construct a search engine URL."
+  )
+  fun browseWeb(
+    @ToolParam(description = "The full URL to browse, including http:// or https://. For searches, use a search engine URL like https://www.google.com/search?q=query") url: String,
+    @ToolParam(
+      description = "Maximum characters to return (default: 2000). Use higher for more detail."
+    )
+    maxChars: Int = 2000
+  ): Map<String, Any> {
+    return runBlocking(Dispatchers.IO) {
+      try {
+        Log.d(TAG, "Browsing URL: $url")
+
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "Browsing: $url",
+            inProgress = true,
+            addItemTitle = "Browse Web",
+            addItemDescription = "URL: $url\nMax chars: $maxChars",
+          )
+        )
+
+        // Create helper and extract content
+        val helper = WebViewHelper(context)
+        val result = helper.extractPageContent(url, maxChars, useReadability = true)
+
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "Browsed: ${result["title"]}",
+            inProgress = false,
+            addItemTitle = "Browse Web Complete",
+            addItemDescription = "Returned ${result["returned_length"]} characters",
+          )
+        )
+
+        result
+      } catch (e: Exception) {
+        Log.e(TAG, "Error browsing web: $url", e)
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "Failed to browse: $url",
+            inProgress = false,
+            addItemTitle = "Browse Web Failed",
+            addItemDescription = e.message ?: "Unknown error",
+          )
+        )
+        mapOf(
+          "error" to (e.message ?: "Failed to load or extract page content"),
+          "url" to url,
+          "status" to "failed"
+        )
+      }
+    }
   }
 }
 

@@ -131,6 +131,7 @@ fun ChatPanel(
   modifier: Modifier = Modifier,
   skillCount: Int = 0,
   mcpCount: Int = 0,
+  mobileActionsCount: Int = 0,
   onSendMessage: (Model, List<ChatMessage>) -> Unit,
   onRunAgainClicked: (Model, ChatMessage) -> Unit,
   onBenchmarkClicked: (Model, ChatMessage, warmUpIterations: Int, benchmarkIterations: Int) -> Unit,
@@ -652,6 +653,7 @@ fun ChatPanel(
         audioClipMessageCount = audioClipMesssageCountToLastconfigChange,
         skillCount = skillCount,
         mcpCount = mcpCount,
+        mobileActionsCount = mobileActionsCount,
         modelInitializing =
           modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZING,
         textFieldPlaceHolderRes = task.textInputPlaceHolderRes,

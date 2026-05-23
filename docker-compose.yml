@@ -6,6 +6,7 @@ services:
     volumes:
       - ./Android/src:/workspace
       - ~/.gradle:/root/.gradle
+      - ~/.android-sdk:/opt/android-sdk
     environment:
       - ANDROID_HOME=/opt/android-sdk
       - ANDROID_SDK_ROOT=/opt/android-sdk

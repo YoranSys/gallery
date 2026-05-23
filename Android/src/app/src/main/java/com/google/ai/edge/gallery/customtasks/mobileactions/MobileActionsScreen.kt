@@ -224,6 +224,7 @@ fun MobileActionsScreen(
   task: Task,
   modelManagerViewModel: ModelManagerViewModel,
   mobileActionsViewModel: MobileActionsViewModel = hiltViewModel(),
+  ttsViewModel: TtsViewModel = hiltViewModel(),
   bottomPadding: Dp,
   setAppBarControlsDisabled: (Boolean) -> Unit,
   curActions: SnapshotStateList<Action>,

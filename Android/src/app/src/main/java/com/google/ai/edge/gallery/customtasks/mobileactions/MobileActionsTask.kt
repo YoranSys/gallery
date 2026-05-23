@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.Functions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import com.google.ai.edge.gallery.R
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.ai.edge.gallery.customtasks.common.CustomTask
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskData
 import com.google.ai.edge.gallery.data.BuiltInTaskId
@@ -105,6 +106,7 @@ class MobileActionsTask @Inject constructor() : CustomTask {
       curActions = curActions,
       tools = tools,
       onProcessingStarted = { curActions.clear() },
+      ttsViewModel = hiltViewModel(),
     )
   }
 }

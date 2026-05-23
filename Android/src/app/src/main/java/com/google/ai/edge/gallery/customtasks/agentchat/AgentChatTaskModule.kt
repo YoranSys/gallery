@@ -38,6 +38,8 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoSet
 import javax.inject.Inject
@@ -127,7 +129,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
         injectSkillsAndMcpTools(
           baseSystemPrompt = systemPrompt,
           skills = agentTools.skillManagerViewModel.getSelectedSkills(),
-          toolsPrompt = agentTools.mcpManagerViewModel.getToolsPrompt(),
+          toolsPrompt = agentTools.getSafeCombinedToolsPrompt(),
         )
 
       LlmChatModelHelper.initialize(
@@ -190,6 +192,15 @@ fun injectSkillsAndMcpTools(
   skills: List<Skill>,
   toolsPrompt: String,
 ): Contents {
+  val now = LocalDateTime.now()
+  val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+  val timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+  val dateStr = now.format(dateFormatter)
+  val timeStr = now.format(timeFormatter)
+  val dayOfWeek = now.dayOfWeek.toString()
+  
+  val dateInfo = "Current date: $dateStr\nCurrent time: $timeStr\nDay of week: $dayOfWeek\n\n"
+
   val selectedSkillsNamesAndDescriptions =
     skills
       .filter { it.selected }
@@ -199,9 +210,9 @@ fun injectSkillsAndMcpTools(
 
   val systemPrompt =
     if (selectedSkillsNamesAndDescriptions.isBlank() && toolsPrompt.isBlank()) {
-      ""
+      dateInfo + baseSystemPrompt
     } else {
-      baseSystemPrompt
+      dateInfo + baseSystemPrompt
         .replace("___SKILLS___", selectedSkillsNamesAndDescriptions)
         .replace("___TOOLS___", toolsPrompt)
     }

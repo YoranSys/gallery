@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.customtasks.mobileactions.TtsViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelCapability
@@ -77,6 +78,7 @@ fun LlmChatScreen(
   curSystemPrompt: String = "",
   onSystemPromptChanged: (String) -> Unit = {},
   emptyStateComposable: @Composable (Model) -> Unit = {},
+  ttsViewModel: TtsViewModel = hiltViewModel(),
   sendMessageTrigger: SendMessageTrigger? = null,
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
@@ -84,6 +86,7 @@ fun LlmChatScreen(
   skillCount: Int = 0,
   mcpCount: Int = 0,
   mcpToolsCount: Int = 0,
+  mobileActionsCount: Int = 0,
 ) {
   ChatViewWrapper(
     viewModel = viewModel,
@@ -102,12 +105,14 @@ fun LlmChatScreen(
     skillCount = skillCount,
     mcpCount = mcpCount,
     mcpToolsCount = mcpToolsCount,
+    mobileActionsCount = mobileActionsCount,
     onSystemPromptChanged = onSystemPromptChanged,
     emptyStateComposable = emptyStateComposable,
     sendMessageTrigger = sendMessageTrigger,
     showImagePicker = showImagePicker,
     showAudioPicker = showAudioPicker,
     getActiveSkills = getActiveSkills,
+    ttsViewModel = ttsViewModel,
   )
 }
 
@@ -120,6 +125,7 @@ fun LlmAskImageScreen(
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
   onSystemPromptChanged: (String) -> Unit = {},
+  ttsViewModel: TtsViewModel = hiltViewModel(),
 ) {
   ChatViewWrapper(
     viewModel = viewModel,
@@ -132,6 +138,7 @@ fun LlmAskImageScreen(
     onSystemPromptChanged = onSystemPromptChanged,
     showImagePicker = true,
     showAudioPicker = false,
+    ttsViewModel = ttsViewModel,
     emptyStateComposable = { model ->
       Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -168,6 +175,7 @@ fun LlmAskAudioScreen(
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
   onSystemPromptChanged: (String) -> Unit = {},
+  ttsViewModel: TtsViewModel = hiltViewModel(),
 ) {
   ChatViewWrapper(
     viewModel = viewModel,
@@ -180,6 +188,7 @@ fun LlmAskAudioScreen(
     onSystemPromptChanged = onSystemPromptChanged,
     showImagePicker = false,
     showAudioPicker = true,
+    ttsViewModel = ttsViewModel,
     emptyStateComposable = {
       Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -226,6 +235,8 @@ fun ChatViewWrapper(
   skillCount: Int = 0,
   mcpCount: Int = 0,
   mcpToolsCount: Int = 0,
+  mobileActionsCount: Int = 0,
+  ttsViewModel: TtsViewModel? = null,
 ) {
   val context = LocalContext.current
   val task = modelManagerViewModel.getTaskById(id = taskId)!!
@@ -235,6 +246,7 @@ fun ChatViewWrapper(
     task = task,
     viewModel = viewModel,
     modelManagerViewModel = modelManagerViewModel,
+    ttsViewModel = ttsViewModel,
     onSendMessage = { model, messages ->
       for (message in messages) {
         viewModel.addMessage(model = model, message = message)

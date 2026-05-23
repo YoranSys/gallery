@@ -131,4 +131,17 @@ class MobileActionsTools(val onFunctionCalled: (Action) -> Unit) : ToolSet {
 
     return mapOf("result" to "success", "datetime" to datetime, "title" to title)
   }
+
+  /** Reads calendar events. */
+  @Tool(description = "Reads calendar events between two dates.")
+  fun readCalendarEvents(
+    @ToolParam(description = "The start date in the format YYYY-MM-DD.") startDate: String,
+    @ToolParam(description = "The end date in the format YYYY-MM-DD.") endDate: String,
+  ): Map<String, String> {
+    Log.d(TAG, "Read calendar events. Start date: '$startDate', end date: '$endDate'")
+
+    onFunctionCalled(ReadCalendarEventsAction(startDate = startDate, endDate = endDate))
+
+    return mapOf("result" to "success", "startDate" to startDate, "endDate" to endDate)
+  }
 }

@@ -160,6 +160,7 @@ fun MessageInputText(
   audioClipMessageCount: Int,
   skillCount: Int = 0,
   mcpCount: Int = 0,
+  mobileActionsCount: Int = 0,
   modelInitializing: Boolean,
   @StringRes textFieldPlaceHolderRes: Int,
   onValueChanged: (String) -> Unit,
@@ -658,6 +659,35 @@ fun MessageInputText(
                         ) {
                           Text(
                             text = mcpCount.toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                          )
+                        }
+                      }
+                    }
+                  }
+
+                  // Mobile Actions.
+                  if (mobileActionsCount > 0) {
+                    OutlinedButton(
+                      onClick = { /* Mobile actions are always available via tool calls */ },
+                      enabled = !inProgress && !isResettingSession && !modelInitializing,
+                      contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Mobile")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Box(
+                          contentAlignment = Alignment.Center,
+                          modifier =
+                            Modifier.background(
+                                MaterialTheme.colorScheme.surfaceContainer,
+                                shape = CircleShape,
+                              )
+                              .height(18.dp)
+                              .widthIn(min = 18.dp),
+                        ) {
+                          Text(
+                            text = mobileActionsCount.toString(),
                             style = MaterialTheme.typography.labelSmall,
                           )
                         }

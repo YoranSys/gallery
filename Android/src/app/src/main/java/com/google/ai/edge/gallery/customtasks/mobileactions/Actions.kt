@@ -34,6 +34,7 @@ enum class ActionType {
   ACTION_SHOW_LOCATION_ON_MAP,
   ACTION_OPEN_WIFI_SETTINGS,
   ACTION_CREATE_CALENDAR_EVENT,
+  ACTION_READ_CALENDAR_EVENTS,
 }
 
 data class FunctionCallDetails(
@@ -135,5 +136,17 @@ class CreateCalendarEventAction(val datetime: String, val title: String) :
       FunctionCallDetails(
         functionName = "createCalendarEvent",
         parameters = listOf(Pair("datetime", datetime), Pair("title", title)),
+      ),
+  )
+
+// Action to read calendar events.
+class ReadCalendarEventsAction(val startDate: String, val endDate: String) :
+  Action(
+    type = ActionType.ACTION_READ_CALENDAR_EVENTS,
+    icon = Icons.Outlined.CalendarMonth,
+    functionCallDetails =
+      FunctionCallDetails(
+        functionName = "readCalendarEvents",
+        parameters = listOf(Pair("startDate", startDate), Pair("endDate", endDate)),
       ),
   )

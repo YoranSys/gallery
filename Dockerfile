@@ -19,16 +19,18 @@ RUN mkdir -p $ANDROID_HOME/cmdline-tools && \
     mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest && \
     rm /tmp/cmdline-tools.zip
 
-# Accept licenses
-RUN yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1
-
 # Install required SDK packages
 RUN $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
     "platform-tools" \
     "platforms;android-34" \
+    "platforms;android-36" \
     "build-tools;34.0.0" \
+    "build-tools;36.1.0" \
     "emulator" \
     > /dev/null 2>&1
+
+# Accept all licenses including those for SDK 36
+RUN yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1
 
 WORKDIR /workspace
 
